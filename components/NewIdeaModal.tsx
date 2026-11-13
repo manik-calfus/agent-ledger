@@ -3,16 +3,18 @@
 import { useEffect, useRef } from "react";
 import type { User } from "firebase/auth";
 import type { UserProfile } from "@/lib/useAuth";
-import IdeaForm from "@/components/IdeaForm";
+import IdeaForm, { type SubmitResult } from "@/components/IdeaForm";
 
 export default function NewIdeaModal({
   user,
   profile,
   onClose,
+  onSubmitted,
 }: {
   user: User;
   profile: UserProfile;
   onClose: () => void;
+  onSubmitted: (result: SubmitResult) => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -47,7 +49,7 @@ export default function NewIdeaModal({
             ×
           </button>
         </div>
-        <IdeaForm user={user} profile={profile} idPrefix="modal" />
+        <IdeaForm user={user} profile={profile} idPrefix="modal" onSubmitted={onSubmitted} />
       </div>
     </div>
   );

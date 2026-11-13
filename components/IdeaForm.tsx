@@ -36,6 +36,8 @@ async function notifyNewIdea(idToken: string, recipients: string[], idea: object
   }
 }
 
+export type SubmitResult = { text: string; warn: boolean };
+
 export default function IdeaForm({
   user,
   profile,
@@ -45,7 +47,8 @@ export default function IdeaForm({
   user: User;
   profile: UserProfile;
   idPrefix: string;
-  onSubmitted?: () => void;
+  // When provided, the caller shows the result (e.g. a modal closes and toasts it).
+  onSubmitted?: (result: SubmitResult) => void;
 }) {
   const people = useActiveUsers();
   const [title, setTitle] = useState("");
@@ -57,7 +60,7 @@ export default function IdeaForm({
   const [contacts, setContacts] = useState<Person[]>([]);
   const [hint, setHint] = useState(DEFAULT_HINT);
   const [hintErr, setHintErr] = useState(false);
-  const [result, setResult] = useState<{ text: string; warn: boolean } | null>(null);
+  const [result, setResult] = useState<SubmitResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const id = (name: string) => `${idPrefix}-${name}`;
@@ -113,17 +116,16 @@ export default function IdeaForm({
       const recipients = people.filter((p) => p.notifyEmail).map((p) => p.email);
       const idToken = await user.getIdToken();
       const notify = await notifyNewIdea(idToken, recipients, newIdea);
-      setResult(
-        notify.ok
-          ? {
-              text: notify.sent
-                ? `Added to the ledger. Emailed ${notify.sent} ${notify.sent === 1 ? "person" : "people"}.`
-                : "Added to the ledger. Nobody has email notifications switched on.",
-              warn: false,
-            }
-          : { text: `Added to the ledger, but the notification email didn't go out — ${notify.reason}.`, warn: true }
-      );
-      onSubmitted?.();
+      const outcome: SubmitResult = notify.ok
+        ? {
+            text: notify.sent
+              ? `Added to the ledger. Emailed ${notify.sent} ${notify.sent === 1 ? "person" : "people"}.`
+              : "Added to the ledger. Nobody has email notifications switched on.",
+            warn: false,
+          }
+        : { text: `Added to the ledger, but the notification email didn't go out — ${notify.reason}.`, warn: true };
+      if (onSubmitted) onSubmitted(outcome);
+      else setResult(outcome);
     } catch {
       setHint("Couldn't save that — try again in a moment.");
       setHintErr(true);

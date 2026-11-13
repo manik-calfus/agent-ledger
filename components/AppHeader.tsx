@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { signOutUser } from "@/lib/firebase";
 import { initials } from "@/lib/useActiveUsers";
 import { useAuth, type UserProfile } from "@/lib/useAuth";
+import type { SubmitResult } from "@/components/IdeaForm";
 import NewIdeaModal from "@/components/NewIdeaModal";
 import NotificationsBell from "@/components/NotificationsBell";
 
@@ -14,6 +15,14 @@ export default function AppHeader({ profile }: { profile: UserProfile }) {
   const { user } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const [newOpen, setNewOpen] = useState(false);
+  const [toast, setToast] = useState<SubmitResult | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    // Warnings stay longer — they explain what went wrong.
+    const t = setTimeout(() => setToast(null), toast.warn ? 12000 : 5000);
+    return () => clearTimeout(t);
+  }, [toast]);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -117,7 +126,26 @@ export default function AppHeader({ profile }: { profile: UserProfile }) {
         </div>
       </nav>
 
-      {newOpen && user && <NewIdeaModal user={user} profile={profile} onClose={() => setNewOpen(false)} />}
+      {newOpen && user && (
+        <NewIdeaModal
+          user={user}
+          profile={profile}
+          onClose={() => setNewOpen(false)}
+          onSubmitted={(result) => {
+            setNewOpen(false);
+            setToast(result);
+          }}
+        />
+      )}
+
+      {toast && (
+        <div className={`toast${toast.warn ? " warn" : ""}`} role="status" aria-live="polite">
+          <span>{toast.text}</span>
+          <button type="button" className="toast-x" aria-label="Dismiss" onClick={() => setToast(null)}>
+            ×
+          </button>
+        </div>
+      )}
     </>
   );
 }
