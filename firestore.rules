@@ -56,7 +56,20 @@ service cloud.firestore {
 
       // Only an active admin can approve, promote, or remove anyone
       // (including editing their own doc, e.g. to add a second admin).
-      allow update, delete: if isAdmin();
+      // Anyone can flip their own email-notification preference, and nothing else.
+      allow update: if isAdmin()
+        || (
+          isSignedIn()
+          && request.auth.uid == uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notifyEmail', 'updatedAt'])
+          && request.resource.data.notifyEmail is bool
+        );
+      allow delete: if isAdmin();
+    }
+
+    // Private per-person state (e.g. when notifications were last read).
+    match /userState/{uid} {
+      allow read, write: if isSignedIn() && request.auth.uid == uid;
     }
 
     match /ideas/{ideaId} {

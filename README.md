@@ -64,6 +64,17 @@ Local dev reads them from `.env.local` (git-ignored). On Vercel they're set unde
 **Project Settings → Environment Variables**. Without them, submissions still work — only the
 notification email is skipped.
 
+**If notification emails aren't arriving:**
+
+1. Open `https://<your-deployment>/api/notify-idea` in a browser. It returns
+   `{"configured": true}` or lists the missing variable *names* (never values).
+2. Env vars only apply to deployments made after they're added — redeploy after adding them.
+3. After submitting an idea, the form says how many people were emailed, or why it failed.
+4. Vercel → your project → **Logs**, filter for `notify-idea` — every failure logs its reason.
+5. Check spam: mail comes from `NOTIFY_AGENT_EMAIL`, which external inboxes (e.g. Gmail) may
+   not trust yet.
+6. People can switch emails off in **Settings**; they're skipped as recipients.
+
 ## 4. Local setup
 
 ```bash

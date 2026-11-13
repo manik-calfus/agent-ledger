@@ -15,6 +15,29 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => map[c]);
 }
 
+const ENV_NAMES = [
+  "NOTIFY_AZURE_TENANT_ID",
+  "NOTIFY_AZURE_CLIENT_ID",
+  "NOTIFY_AZURE_CLIENT_SECRET",
+  "NOTIFY_AGENT_EMAIL",
+] as const;
+
+function missingEnv(): string[] {
+  return ENV_NAMES.filter((n) => !process.env[n]);
+}
+
+// Lets you check a deployment's setup by opening /api/notify-idea in a
+// browser. Reports only which variable NAMES are missing, never values.
+export async function GET() {
+  const missing = missingEnv();
+  return NextResponse.json({ configured: missing.length === 0, missing });
+}
+
+function fail(error: string, status: number, detail?: string) {
+  console.error(`[notify-idea] ${error}${detail ? `: ${detail}` : ""}`);
+  return NextResponse.json({ error, detail }, { status });
+}
+
 type IdeaPayload = {
   title?: string;
   desc?: string;
@@ -30,12 +53,12 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "bad_request" }, { status: 400 });
+    return fail("bad_request", 400);
   }
 
   const { idToken, recipients, idea } = body;
   if (typeof idToken !== "string" || !idToken) {
-    return NextResponse.json({ error: "missing_token" }, { status: 401 });
+    return fail("missing_token", 401);
   }
 
   // Verifying the Firebase ID token needs no secret — it checks the JWT
@@ -43,8 +66,8 @@ export async function POST(req: NextRequest) {
   // This just confirms the caller is a real signed-in user, not a bot.
   try {
     await getAuth(adminApp()).verifyIdToken(idToken);
-  } catch {
-    return NextResponse.json({ error: "invalid_token" }, { status: 401 });
+  } catch (e) {
+    return fail("invalid_token", 401, e instanceof Error ? e.message : String(e));
   }
 
   const toAddrs = Array.isArray(recipients)
@@ -63,7 +86,7 @@ export async function POST(req: NextRequest) {
   const sender = process.env.NOTIFY_AGENT_EMAIL;
 
   if (!tenantId || !clientId || !clientSecret || !sender) {
-    return NextResponse.json({ error: "not_configured" }, { status: 503 });
+    return fail("not_configured", 503, `missing ${missingEnv().join(", ")}`);
   }
 
   try {
@@ -77,9 +100,10 @@ export async function POST(req: NextRequest) {
         grant_type: "client_credentials",
       }),
     });
-    const tokenJson: { access_token?: string } = await tokenRes.json();
+    const tokenJson: { access_token?: string; error?: string; error_description?: string } =
+      await tokenRes.json();
     if (!tokenRes.ok || !tokenJson.access_token) {
-      return NextResponse.json({ error: "graph_auth_failed" }, { status: 502 });
+      return fail("graph_auth_failed", 502, tokenJson.error_description || tokenJson.error);
     }
 
     const title = idea?.title || "A new agent idea";
@@ -124,12 +148,12 @@ export async function POST(req: NextRequest) {
     );
 
     if (!sendRes.ok) {
-      const detail = await sendRes.text();
-      return NextResponse.json({ error: "send_failed", detail }, { status: 502 });
+      return fail("send_failed", 502, (await sendRes.text()).slice(0, 500));
     }
 
+    console.log(`[notify-idea] sent to ${toAddrs.length} recipient(s)`);
     return NextResponse.json({ ok: true, sent: toAddrs.length });
-  } catch {
-    return NextResponse.json({ error: "unexpected" }, { status: 500 });
+  } catch (e) {
+    return fail("unexpected", 500, e instanceof Error ? e.message : String(e));
   }
 }

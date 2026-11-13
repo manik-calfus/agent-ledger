@@ -30,7 +30,7 @@ export default function ContributorPicker({
   }, [people, queryText, selectedUids]);
 
   function add(p: Person) {
-    onChange([...value, p]);
+    onChange([...value, { uid: p.uid, name: p.name, email: p.email }]);
     setQueryText("");
     setHighlight(0);
     inputRef.current?.focus();

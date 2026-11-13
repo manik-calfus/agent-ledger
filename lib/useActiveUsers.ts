@@ -5,9 +5,10 @@ import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 export type Person = { uid: string; name: string; email: string };
+export type ActivePerson = Person & { notifyEmail: boolean };
 
-export function useActiveUsers(): Person[] {
-  const [people, setPeople] = useState<Person[]>([]);
+export function useActiveUsers(): ActivePerson[] {
+  const [people, setPeople] = useState<ActivePerson[]>([]);
 
   useEffect(() => {
     if (!db) return;
@@ -17,7 +18,12 @@ export function useActiveUsers(): Person[] {
         snap.docs
           .map((d) => {
             const data = d.data();
-            return { uid: d.id, name: (data.name as string) || "", email: (data.email as string) || "" };
+            return {
+              uid: d.id,
+              name: (data.name as string) || "",
+              email: (data.email as string) || "",
+              notifyEmail: data.notifyEmail !== false,
+            };
           })
           .filter((p) => p.email)
           .sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email))
