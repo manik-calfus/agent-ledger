@@ -90,8 +90,9 @@ export default function UserManagement({
   }
 
   return (
+    <>
+    <AppHeader profile={profile} />
     <div className="wrap">
-      <AppHeader profile={profile} backHref="/" />
 
       <header className="top">
         <div className="title-block">
@@ -195,5 +196,6 @@ export default function UserManagement({
         {!sorted.length && <div className="empty-note">No one has signed in yet.</div>}
       </div>
     </div>
+    </>
   );
 }

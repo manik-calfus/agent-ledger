@@ -11,12 +11,13 @@ import {
   onSnapshot,
   orderBy,
   query,
-  where,
 } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import { db } from "@/lib/firebase";
 import type { UserProfile } from "@/lib/useAuth";
+import { useActiveUsers, type Person } from "@/lib/useActiveUsers";
 import AppHeader from "@/components/AppHeader";
+import ContributorPicker from "@/components/ContributorPicker";
 
 type Idea = {
   id: string;
@@ -73,7 +74,8 @@ async function notifyNewIdea(idToken: string, recipients: string[], idea: Idea) 
 
 export default function Ledger({ user, profile }: { user: User; profile: UserProfile }) {
   const [items, setItems] = useState<Idea[]>([]);
-  const [activeEmails, setActiveEmails] = useState<string[]>([]);
+  const people = useActiveUsers();
+  const [contacts, setContacts] = useState<Person[]>([]);
   const [sort, setSort] = useState<SortKey>("net");
 
   const [title, setTitle] = useState("");
@@ -107,15 +109,6 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
         };
       });
       setItems(next);
-    });
-    return () => unsub();
-  }, []);
-
-  useEffect(() => {
-    if (!db) return;
-    const q = query(collection(db, "users"), where("status", "==", "active"));
-    const unsub = onSnapshot(q, (snap) => {
-      setActiveEmails(snap.docs.map((d) => (d.data().email as string) || "").filter(Boolean));
     });
     return () => unsub();
   }, []);
@@ -171,6 +164,8 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
         submittedByUid: user.uid,
         submittedByName: profile.name,
         submittedByEmail: profile.email,
+        contributors: contacts,
+        contributorUids: contacts.map((p) => p.uid),
       };
       await addDoc(collection(db, "ideas"), newIdea);
       setTitle("");
@@ -179,9 +174,14 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
       setArea("");
       setCost("");
       setRevenue("");
+      setContacts([]);
 
       const idToken = await user.getIdToken();
-      void notifyNewIdea(idToken, activeEmails, newIdea as Idea);
+      void notifyNewIdea(
+        idToken,
+        people.map((p) => p.email),
+        newIdea as unknown as Idea
+      );
     } catch {
       setHint("Couldn't save that — try again in a moment.");
       setHintErr(true);
@@ -202,9 +202,9 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
   const netClass = totals.net >= 0 ? "good" : "bad";
 
   return (
+    <>
+    <AppHeader profile={profile} />
     <div className="wrap">
-      <AppHeader profile={profile} />
-
       <header className="top">
         <div className="title-block">
           <div className="eyebrow">Internal · Build vs. Return</div>
@@ -331,6 +331,11 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
           </div>
           <div className={`hint${hintErr ? " err" : ""}`}>{hint}</div>
 
+          <div className="field" style={{ marginTop: 14 }}>
+            <label htmlFor="f-contacts">Points of contact (optional)</label>
+            <ContributorPicker id="f-contacts" people={people} value={contacts} onChange={setContacts} />
+          </div>
+
           <button type="submit" className="submit-btn" disabled={submitting}>
             {submitting ? "Adding…" : "Add to the ledger"}
           </button>
@@ -416,5 +421,6 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
         </div>
       </div>
     </div>
+    </>
   );
 }

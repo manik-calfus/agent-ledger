@@ -74,7 +74,19 @@ service cloud.firestore {
       allow delete: if isActive()
         && (resource.data.submittedByUid == request.auth.uid || isAdmin());
 
-      allow update: if false;
+      // Only the points-of-contact list can change after submission, and only
+      // by the submitter, an existing point of contact, or an admin.
+      allow update: if isActive()
+        && (
+          resource.data.submittedByUid == request.auth.uid
+          || isAdmin()
+          || request.auth.uid in resource.data.get('contributorUids', [])
+        )
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['contributors', 'contributorUids', 'updatedAt'])
+        && request.resource.data.contributors is list
+        && request.resource.data.contributorUids is list
+        && request.resource.data.contributorUids.size() <= 20;
     }
   }
 }
