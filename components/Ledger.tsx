@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   addDoc,
@@ -10,8 +11,12 @@ import {
   onSnapshot,
   orderBy,
   query,
+  where,
 } from "firebase/firestore";
-import { db, ensureSignedIn, isFirebaseConfigured } from "@/lib/firebase";
+import type { User } from "firebase/auth";
+import { db } from "@/lib/firebase";
+import type { UserProfile } from "@/lib/useAuth";
+import AppHeader from "@/components/AppHeader";
 
 type Idea = {
   id: string;
@@ -22,48 +27,14 @@ type Idea = {
   cost: number;
   revenue: number;
   createdAt: number;
-  submittedBy: string | null;
+  submittedByUid: string;
+  submittedByName: string;
+  submittedByEmail: string;
 };
 
 type SortKey = "net" | "revenue" | "cost" | "new";
 
 const AREAS = ["Sales", "Support", "Engineering", "Marketing", "Finance", "Operations", "HR", "Product", "Other"];
-
-const EXAMPLES: Idea[] = [
-  {
-    id: "",
-    title: "Invoice Triage Agent",
-    link: "https://example.com/invoice-triage",
-    desc: "Reads inbound vendor invoices, flags mismatches against POs, routes exceptions to AP.",
-    area: "Finance",
-    cost: 18000,
-    revenue: 64000,
-    createdAt: 0,
-    submittedBy: null,
-  },
-  {
-    id: "",
-    title: "Renewal Risk Scout",
-    link: "https://example.com/renewal-scout",
-    desc: "Scans support tickets and usage dips to flag accounts likely to churn before renewal.",
-    area: "Sales",
-    cost: 32000,
-    revenue: 51000,
-    createdAt: 0,
-    submittedBy: null,
-  },
-  {
-    id: "",
-    title: "Changelog Digest Agent",
-    link: "https://example.com/changelog-digest",
-    desc: "Summarizes weekly engineering merges into a plain-language customer-facing digest.",
-    area: "Marketing",
-    cost: 9000,
-    revenue: 7000,
-    createdAt: 0,
-    submittedBy: null,
-  },
-];
 
 function fmt(n: number): string {
   const rounded = Math.round(Number(n) || 0);
@@ -88,11 +59,22 @@ function net(it: Idea): number {
   return (Number(it.revenue) || 0) - (Number(it.cost) || 0);
 }
 
-export default function Ledger() {
+async function notifyNewIdea(idToken: string, recipients: string[], idea: Idea) {
+  try {
+    await fetch("/api/notify-idea", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken, recipients, idea }),
+    });
+  } catch {
+    // Best-effort — a failed notification shouldn't block the submission.
+  }
+}
+
+export default function Ledger({ user, profile }: { user: User; profile: UserProfile }) {
   const [items, setItems] = useState<Idea[]>([]);
+  const [activeEmails, setActiveEmails] = useState<string[]>([]);
   const [sort, setSort] = useState<SortKey>("net");
-  const [connected, setConnected] = useState<"connecting" | "live" | "offline">("connecting");
-  const [userId, setUserId] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
   const [link, setLink] = useState("");
@@ -105,42 +87,41 @@ export default function Ledger() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!isFirebaseConfigured || !db) {
-      setConnected("offline");
-      return;
-    }
-    ensureSignedIn()
-      .then(setUserId)
-      .catch(() => setUserId(null));
-
+    if (!db) return;
     const q = query(collection(db, "ideas"), orderBy("createdAt", "desc"), limit(500));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setConnected("live");
-        const next: Idea[] = snap.docs.map((d) => {
-          const data = d.data() as Partial<Idea>;
-          return {
-            id: d.id,
-            title: data.title || "Untitled agent",
-            link: data.link || "",
-            desc: data.desc || "",
-            area: data.area || "Other",
-            cost: Number(data.cost) || 0,
-            revenue: Number(data.revenue) || 0,
-            createdAt: Number(data.createdAt) || 0,
-            submittedBy: data.submittedBy || null,
-          };
-        });
-        setItems(next);
-      },
-      () => setConnected("offline")
-    );
+    const unsub = onSnapshot(q, (snap) => {
+      const next: Idea[] = snap.docs.map((d) => {
+        const data = d.data() as Partial<Idea>;
+        return {
+          id: d.id,
+          title: data.title || "Untitled agent",
+          link: data.link || "",
+          desc: data.desc || "",
+          area: data.area || "Other",
+          cost: Number(data.cost) || 0,
+          revenue: Number(data.revenue) || 0,
+          createdAt: Number(data.createdAt) || 0,
+          submittedByUid: data.submittedByUid || "",
+          submittedByName: data.submittedByName || "Someone",
+          submittedByEmail: data.submittedByEmail || "",
+        };
+      });
+      setItems(next);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!db) return;
+    const q = query(collection(db, "users"), where("status", "==", "active"));
+    const unsub = onSnapshot(q, (snap) => {
+      setActiveEmails(snap.docs.map((d) => (d.data().email as string) || "").filter(Boolean));
+    });
     return () => unsub();
   }, []);
 
   const sorted = useMemo(() => {
-    const list = items.length ? items.slice() : EXAMPLES.slice();
+    const list = items.slice();
     if (sort === "net") list.sort((a, b) => net(b) - net(a));
     else if (sort === "revenue") list.sort((a, b) => b.revenue - a.revenue);
     else if (sort === "cost") list.sort((a, b) => a.cost - b.cost);
@@ -171,7 +152,7 @@ export default function Ledger() {
       return;
     }
     if (!db) {
-      setHint("Firebase isn't configured yet, so this won't be saved. See the README.");
+      setHint("Firebase isn't configured yet, so this won't be saved.");
       setHintErr(true);
       return;
     }
@@ -179,7 +160,7 @@ export default function Ledger() {
     setHintErr(false);
     setSubmitting(true);
     try {
-      await addDoc(collection(db, "ideas"), {
+      const newIdea = {
         title: title.trim(),
         link: url,
         desc: desc.trim(),
@@ -187,14 +168,20 @@ export default function Ledger() {
         cost: costNum,
         revenue: revenueNum,
         createdAt: Date.now(),
-        submittedBy: userId,
-      });
+        submittedByUid: user.uid,
+        submittedByName: profile.name,
+        submittedByEmail: profile.email,
+      };
+      await addDoc(collection(db, "ideas"), newIdea);
       setTitle("");
       setLink("");
       setDesc("");
       setArea("");
       setCost("");
       setRevenue("");
+
+      const idToken = await user.getIdToken();
+      void notifyNewIdea(idToken, activeEmails, newIdea as Idea);
     } catch {
       setHint("Couldn't save that — try again in a moment.");
       setHintErr(true);
@@ -216,6 +203,8 @@ export default function Ledger() {
 
   return (
     <div className="wrap">
+      <AppHeader profile={profile} />
+
       <header className="top">
         <div className="title-block">
           <div className="eyebrow">Internal · Build vs. Return</div>
@@ -224,12 +213,6 @@ export default function Ledger() {
             Pitch an AI agent, price what it takes to build, and project what it returns. Sorted by net
             value so the best bets rise to the top.
           </p>
-        </div>
-        <div className="conn">
-          <span className={`dot${connected === "live" ? "" : " off"}`} />
-          <span>
-            {connected === "live" ? "Live" : connected === "connecting" ? "Connecting…" : "Offline — add Firebase config to save"}
-          </span>
         </div>
       </header>
 
@@ -387,23 +370,15 @@ export default function Ledger() {
 
             {sorted.map((it, i) => {
               const n = net(it);
-              const url = safeUrl(it.link);
-              const isExample = !it.id;
-              const canDelete = !isExample && it.submittedBy && userId && it.submittedBy === userId;
+              const canDelete = it.submittedByUid === user.uid || profile.role === "admin";
               return (
-                <div className={`lrow${i % 2 ? " odd" : ""}`} key={it.id || `example-${i}`}>
+                <div className={`lrow${i % 2 ? " odd" : ""}`} key={it.id}>
                   <div>
                     <div className="idea-title">
-                      {url ? (
-                        <a href={url} target="_blank" rel="noopener noreferrer">
-                          {it.title}
-                        </a>
-                      ) : (
-                        it.title
-                      )}
-                      {isExample && <span className="badge example">Example</span>}
+                      <Link href={`/ideas/${it.id}`}>{it.title}</Link>
                     </div>
                     <div className="idea-desc">{it.desc}</div>
+                    <div className="idea-meta">Submitted by {it.submittedByName}</div>
                   </div>
                   <div>
                     <span className="badge">{it.area}</span>
@@ -435,10 +410,7 @@ export default function Ledger() {
             })}
 
             {!items.length && (
-              <div className="empty-note">
-                These three are examples so you can see how the ledger reads. Submit the first real idea on
-                the left to replace them.
-              </div>
+              <div className="empty-note">No ideas yet — be the first to submit one on the left.</div>
             )}
           </div>
         </div>
