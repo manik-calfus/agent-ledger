@@ -126,6 +126,15 @@ input[type="text"], input[type="url"], input[type="number"], input[type="email"]
   color: var(--ink); border-radius: 7px; padding: 9px 10px; font-size: 14px;
   font-family: inherit;
 }
+input[type="text"], input[type="url"], input[type="number"], input[type="email"], input[type="password"], select {
+  height: 40px;
+}
+/* Safari ignores padding/height on natively-styled selects, so draw our own. */
+select {
+  appearance: none; -webkit-appearance: none; padding-right: 32px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5l3 3 3-3' stroke='%235b5447' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 11px center;
+}
 .amount-input { position: relative; }
 .amount-input span {
   position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
@@ -268,7 +277,7 @@ input:focus, textarea:focus, select:focus {
 .panel.add-user { position: static; margin-bottom: 24px; }
 .add-user-grid { display: grid; grid-template-columns: 1.2fr 1.4fr .8fr auto; gap: 12px; align-items: end; }
 .add-user-grid .field { margin-bottom: 0; }
-.add-user-submit .submit-btn { margin-top: 0; padding: 9px 18px; white-space: nowrap; }
+.add-user-submit .submit-btn { margin-top: 0; height: 40px; padding: 0 18px; white-space: nowrap; }
 @media (max-width: 760px) { .add-user-grid { grid-template-columns: 1fr; } }
 
 
@@ -343,7 +352,7 @@ input:focus, textarea:focus, select:focus {
 .picker-box:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; border-color: var(--focus); }
 .picker-input {
   flex: 1; min-width: 140px; border: none !important; outline: none !important; background: transparent !important;
-  padding: 4px !important; font-size: 13.5px;
+  padding: 4px !important; height: auto !important; font-size: 13.5px;
 }
 .chip {
   display: inline-flex; align-items: center; gap: 6px; background: var(--paper-raised); border: 1px solid var(--line);
