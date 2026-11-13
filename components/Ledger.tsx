@@ -71,6 +71,10 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
     return list;
   }, [ideas, sort, search, areaFilter, personFilter, valueFilter, user.uid]);
 
+  const canDelete = (it: { submittedByUid: string }) =>
+    it.submittedByUid === user.uid || profile.role === "admin";
+  const showActions = visible.some(canDelete);
+
   const totals = useMemo(() => {
     const cost = ideas.reduce((s, it) => s + it.cost, 0);
     const revenue = ideas.reduce((s, it) => s + it.revenue, 0);
@@ -212,19 +216,18 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
               </div>
             )}
 
-            <div className="ledger">
+            <div className={`ledger${showActions ? "" : " no-actions"}`}>
               <div className="lrow head">
                 <div>Idea</div>
                 <div>Area</div>
                 <div style={{ textAlign: "right" }}>Cost</div>
                 <div style={{ textAlign: "right" }}>Revenue</div>
                 <div style={{ textAlign: "right" }}>Net</div>
-                <div />
+                {showActions && <div />}
               </div>
 
               {visible.map((it, i) => {
                 const n = net(it);
-                const canDelete = it.submittedByUid === user.uid || profile.role === "admin";
                 return (
                   <div className={`lrow${i % 2 ? " odd" : ""}`} key={it.id}>
                     <div>
@@ -249,13 +252,15 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
                       <span className="cap">Net</span>
                       <span className={`net-pill num ${n >= 0 ? "good" : "bad"}`}>{fmtSigned(n)}</span>
                     </div>
+                    {showActions && (
                     <div className="row-actions">
-                      {canDelete && (
+                      {canDelete(it) && (
                         <button type="button" className="del-btn" onClick={() => handleDelete(it.id)}>
                           Remove
                         </button>
                       )}
                     </div>
+                    )}
                   </div>
                 );
               })}
