@@ -31,9 +31,12 @@ type Idea = {
   submittedByUid: string;
   submittedByName: string;
   submittedByEmail: string;
+  contributorUids: string[];
 };
 
 type SortKey = "net" | "revenue" | "cost" | "new";
+type OwnerFilter = "all" | "mine" | "contact";
+type ValueFilter = "all" | "profitable" | "loss";
 
 const AREAS = ["Sales", "Support", "Engineering", "Marketing", "Finance", "Operations", "HR", "Product", "Other"];
 
@@ -77,6 +80,19 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
   const people = useActiveUsers();
   const [contacts, setContacts] = useState<Person[]>([]);
   const [sort, setSort] = useState<SortKey>("net");
+  const [search, setSearch] = useState("");
+  const [areaFilter, setAreaFilter] = useState("all");
+  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>("all");
+  const [valueFilter, setValueFilter] = useState<ValueFilter>("all");
+  const filtersActive =
+    search.trim() !== "" || areaFilter !== "all" || ownerFilter !== "all" || valueFilter !== "all";
+
+  function clearFilters() {
+    setSearch("");
+    setAreaFilter("all");
+    setOwnerFilter("all");
+    setValueFilter("all");
+  }
 
   const [title, setTitle] = useState("");
   const [link, setLink] = useState("");
@@ -106,6 +122,7 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
           submittedByUid: data.submittedByUid || "",
           submittedByName: data.submittedByName || "Someone",
           submittedByEmail: data.submittedByEmail || "",
+          contributorUids: Array.isArray(data.contributorUids) ? data.contributorUids : [],
         };
       });
       setItems(next);
@@ -114,13 +131,28 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
   }, []);
 
   const sorted = useMemo(() => {
-    const list = items.slice();
+    const q = search.trim().toLowerCase();
+    const list = items.filter((it) => {
+      if (areaFilter !== "all" && it.area !== areaFilter) return false;
+      if (ownerFilter === "mine" && it.submittedByUid !== user.uid) return false;
+      if (ownerFilter === "contact" && !it.contributorUids.includes(user.uid)) return false;
+      if (valueFilter === "profitable" && net(it) <= 0) return false;
+      if (valueFilter === "loss" && net(it) > 0) return false;
+      if (
+        q &&
+        !it.title.toLowerCase().includes(q) &&
+        !it.desc.toLowerCase().includes(q) &&
+        !it.submittedByName.toLowerCase().includes(q)
+      )
+        return false;
+      return true;
+    });
     if (sort === "net") list.sort((a, b) => net(b) - net(a));
     else if (sort === "revenue") list.sort((a, b) => b.revenue - a.revenue);
     else if (sort === "cost") list.sort((a, b) => a.cost - b.cost);
     else if (sort === "new") list.sort((a, b) => b.createdAt - a.createdAt);
     return list;
-  }, [items, sort]);
+  }, [items, sort, search, areaFilter, ownerFilter, valueFilter, user.uid]);
 
   const totals = useMemo(() => {
     const totalCost = items.reduce((s, it) => s + (Number(it.cost) || 0), 0);
@@ -363,6 +395,57 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
             </div>
           </div>
 
+          <div className="filter-bar" role="search">
+            <div className="filter-search">
+              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" fill="none" />
+                <path d="M20 20l-3.5-3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+              <input
+                type="text"
+                aria-label="Search ideas"
+                placeholder="Search ideas, descriptions, people"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <select aria-label="Filter by area" value={areaFilter} onChange={(e) => setAreaFilter(e.target.value)}>
+              <option value="all">All areas</option>
+              {AREAS.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Filter by person"
+              value={ownerFilter}
+              onChange={(e) => setOwnerFilter(e.target.value as OwnerFilter)}
+            >
+              <option value="all">Everyone&apos;s ideas</option>
+              <option value="mine">Submitted by me</option>
+              <option value="contact">I&apos;m a point of contact</option>
+            </select>
+            <select
+              aria-label="Filter by net value"
+              value={valueFilter}
+              onChange={(e) => setValueFilter(e.target.value as ValueFilter)}
+            >
+              <option value="all">Any net value</option>
+              <option value="profitable">Net positive</option>
+              <option value="loss">Break-even or loss</option>
+            </select>
+          </div>
+
+          {filtersActive && (
+            <div className="filter-status">
+              Showing {sorted.length} of {items.length} {items.length === 1 ? "idea" : "ideas"}
+              <button type="button" className="link-btn" onClick={clearFilters}>
+                Clear filters
+              </button>
+            </div>
+          )}
+
           <div className="ledger">
             <div className="lrow head">
               <div>Idea</div>
@@ -416,6 +499,14 @@ export default function Ledger({ user, profile }: { user: User; profile: UserPro
 
             {!items.length && (
               <div className="empty-note">No ideas yet — be the first to submit one on the left.</div>
+            )}
+            {items.length > 0 && !sorted.length && (
+              <div className="empty-note">
+                No ideas match these filters.{" "}
+                <button type="button" className="link-btn" onClick={clearFilters}>
+                  Clear filters
+                </button>
+              </div>
             )}
           </div>
         </div>
