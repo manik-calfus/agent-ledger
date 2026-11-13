@@ -29,19 +29,29 @@ service cloud.firestore {
       // Anyone signed in can read the directory (admin tab + idea attribution).
       allow read: if isSignedIn();
 
-      // A person can only ever create their OWN doc, once, as a pending
-      // member — unless their email is pre-approved, in which case they
-      // self-activate as admin. No other combination of fields is allowed,
-      // so nobody can grant themselves access by hand-crafting the write.
-      allow create: if isSignedIn()
-        && request.auth.uid == uid
-        && request.resource.data.email == request.auth.token.email.lower()
-        && (
-          (request.resource.data.status == 'pending' && request.resource.data.role == 'member')
-          ||
-          (isPreApprovedAdmin(request.resource.data.email)
-            && request.resource.data.status == 'active'
-            && request.resource.data.role == 'admin')
+      // Self sign-up: only your OWN doc, only with a verified email, and only
+      // as a pending member — unless the email is pre-approved, in which case
+      // it self-activates as admin. Requiring verification stops someone
+      // registering a pre-approved admin's address before they do.
+      // Admins can also create a doc for anyone (the "Add user" form).
+      allow create: if (
+          isSignedIn()
+          && request.auth.uid == uid
+          && request.auth.token.email_verified == true
+          && request.resource.data.email == request.auth.token.email.lower()
+          && (
+            (request.resource.data.status == 'pending' && request.resource.data.role == 'member')
+            ||
+            (isPreApprovedAdmin(request.resource.data.email)
+              && request.resource.data.status == 'active'
+              && request.resource.data.role == 'admin')
+          )
+        )
+        || (
+          isAdmin()
+          && request.resource.data.email is string
+          && request.resource.data.role in ['admin', 'member']
+          && request.resource.data.status in ['active', 'pending']
         );
 
       // Only an active admin can approve, promote, or remove anyone

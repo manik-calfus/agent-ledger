@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { collection, doc, onSnapshot, orderBy, query, updateDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { collection, doc, onSnapshot, orderBy, query, setDoc, updateDoc } from "firebase/firestore";
+import { FirebaseError } from "firebase/app";
+import { createAccountForSomeoneElse, db } from "@/lib/firebase";
 import type { UserProfile, UserRole, UserStatus } from "@/lib/useAuth";
 import AppHeader from "@/components/AppHeader";
 
@@ -18,6 +19,51 @@ export default function UserManagement({
   profile: UserProfile;
 }) {
   const [rows, setRows] = useState<UserRow[]>([]);
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newRole, setNewRole] = useState<UserRole>("member");
+  const [adding, setAdding] = useState(false);
+  const [addMsg, setAddMsg] = useState<{ text: string; err: boolean } | null>(null);
+
+  async function handleAdd(e: FormEvent) {
+    e.preventDefault();
+    if (!db) return;
+    setAdding(true);
+    setAddMsg(null);
+    const email = newEmail.trim().toLowerCase();
+    try {
+      const uid = await createAccountForSomeoneElse(email);
+      const now = Date.now();
+      await setDoc(doc(db, "users", uid), {
+        email,
+        name: newName.trim() || email,
+        role: newRole,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      });
+      setAddMsg({
+        text: `Added ${email} as ${newRole === "admin" ? "an admin" : "a member"}. They've been emailed a link to set their password.`,
+        err: false,
+      });
+      setNewName("");
+      setNewEmail("");
+      setNewRole("member");
+    } catch (err) {
+      const code = err instanceof FirebaseError ? err.code : "";
+      setAddMsg({
+        text:
+          code === "auth/email-already-in-use"
+            ? "That email already has an account — find them in the list below to approve or promote them."
+            : code === "auth/invalid-email"
+              ? "That doesn't look like a valid email address."
+              : "Couldn't add that user — try again.",
+        err: true,
+      });
+    } finally {
+      setAdding(false);
+    }
+  }
 
   useEffect(() => {
     if (!db) return;
@@ -52,12 +98,39 @@ export default function UserManagement({
           <div className="eyebrow">Admin</div>
           <h1>User management</h1>
           <p>
-            Approve people after their first sign-in, promote admins, or remove someone&apos;s access.
-            There&apos;s no way to invite someone before they&apos;ve signed in once — they show up here
-            as &quot;Pending&quot; the moment they do.
+            Add people directly as members or admins, approve anyone who signed up on their own,
+            promote admins, or remove someone&apos;s access.
           </p>
         </div>
       </header>
+
+      <form className="panel add-user" onSubmit={handleAdd}>
+        <h2>Add a user</h2>
+        <p className="sub">They&apos;ll get an email with a link to set their own password.</p>
+        <div className="add-user-grid">
+          <div className="field">
+            <label htmlFor="u-name">Full name</label>
+            <input id="u-name" type="text" required value={newName} onChange={(e) => setNewName(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="u-email">Email</label>
+            <input id="u-email" type="email" required value={newEmail} onChange={(e) => setNewEmail(e.target.value)} />
+          </div>
+          <div className="field">
+            <label htmlFor="u-role">Role</label>
+            <select id="u-role" value={newRole} onChange={(e) => setNewRole(e.target.value as UserRole)}>
+              <option value="member">Member</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div className="field add-user-submit">
+            <button type="submit" className="submit-btn" disabled={adding}>
+              {adding ? "Adding…" : "Add user"}
+            </button>
+          </div>
+        </div>
+        {addMsg && <div className={`hint${addMsg.err ? " err" : ""}`}>{addMsg.text}</div>}
+      </form>
 
       <div className="admin-table">
         <div className="arow head">

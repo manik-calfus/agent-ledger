@@ -2,8 +2,10 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -27,14 +29,19 @@ type AuthState = {
   loading: boolean;
   configured: boolean;
   user: User | null;
+  emailVerified: boolean;
   profile: UserProfile | null;
 };
 
-const AuthContext = createContext<AuthState>({
+type AuthContextValue = AuthState & { refresh: () => Promise<void> };
+
+const AuthContext = createContext<AuthContextValue>({
   loading: true,
   configured: false,
   user: null,
+  emailVerified: false,
   profile: null,
+  refresh: async () => {},
 });
 
 export function useAuth() {
@@ -51,8 +58,8 @@ async function ensureProfileDoc(user: User) {
   const isPreApprovedAdmin = ADMIN_EMAILS.map((a) => a.toLowerCase()).includes(email);
   const now = Date.now();
 
-  // Mirrors firestore.rules: a brand-new doc can only be self-created as a
-  // pending member, except the hardcoded admin email(s), which self-activate.
+  // Mirrors firestore.rules: self-created docs start pending, except the
+  // hardcoded admin email(s), which self-activate.
   await setDoc(ref, {
     email,
     name: user.displayName || email || "Someone",
@@ -68,59 +75,84 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loading: true,
     configured: isFirebaseConfigured,
     user: null,
+    emailVerified: false,
     profile: null,
   });
+  const unsubProfile = useRef<(() => void) | null>(null);
+
+  const load = useCallback(async (user: User | null) => {
+    if (unsubProfile.current) {
+      unsubProfile.current();
+      unsubProfile.current = null;
+    }
+
+    if (!user || !db) {
+      setState({ loading: false, configured: isFirebaseConfigured, user: null, emailVerified: false, profile: null });
+      return;
+    }
+
+    setState((s) => ({ ...s, loading: true, user }));
+
+    const ref = doc(db, "users", user.uid);
+
+    // An admin-created account already has a profile doc; it shouldn't be
+    // blocked on verification (the password-reset link they used proves the inbox).
+    let existing = false;
+    try {
+      existing = (await getDoc(ref)).exists();
+    } catch {
+      existing = false;
+    }
+
+    if (!existing && !user.emailVerified) {
+      setState({ loading: false, configured: true, user, emailVerified: false, profile: null });
+      return;
+    }
+
+    if (!existing) {
+      try {
+        await ensureProfileDoc(user);
+      } catch {
+        // Surfaces below as "no profile".
+      }
+    }
+
+    unsubProfile.current = onSnapshot(
+      ref,
+      (snap) =>
+        setState({
+          loading: false,
+          configured: true,
+          user,
+          emailVerified: true,
+          profile: snap.exists() ? (snap.data() as UserProfile) : null,
+        }),
+      () => setState({ loading: false, configured: true, user, emailVerified: true, profile: null })
+    );
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const current = auth?.currentUser;
+    if (!current) return;
+    await current.reload();
+    // Picks up the email_verified claim firestore.rules checks.
+    await current.getIdToken(true);
+    await load(auth!.currentUser);
+  }, [load]);
 
   useEffect(() => {
     if (!auth || !db) {
       setState((s) => ({ ...s, loading: false }));
       return;
     }
-
-    let unsubProfile: (() => void) | null = null;
-
-    const unsubAuth = onAuthStateChanged(auth, async (user) => {
-      if (unsubProfile) {
-        unsubProfile();
-        unsubProfile = null;
-      }
-
-      if (!user) {
-        setState({ loading: false, configured: true, user: null, profile: null });
-        return;
-      }
-
-      setState((s) => ({ ...s, loading: true, user }));
-
-      try {
-        await ensureProfileDoc(user);
-      } catch {
-        // If this fails (e.g. a rules edge case), the onSnapshot below still
-        // reflects reality — surfaced to the user as "no profile yet".
-      }
-
-      const ref = doc(db!, "users", user.uid);
-      unsubProfile = onSnapshot(
-        ref,
-        (snap) => {
-          setState({
-            loading: false,
-            configured: true,
-            user,
-            profile: snap.exists() ? (snap.data() as UserProfile) : null,
-          });
-        },
-        () => {
-          setState({ loading: false, configured: true, user, profile: null });
-        }
-      );
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      void load(user);
     });
-
     return () => {
       unsubAuth();
-      if (unsubProfile) unsubProfile();
+      if (unsubProfile.current) unsubProfile.current();
     };
-  }, []);
+  }, [load]);
 
-  return <AuthContext.Provider value={state}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ ...state, refresh }}>{children}</AuthContext.Provider>;
 }
